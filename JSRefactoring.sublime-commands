@@ -1,0 +1,3 @@
+[
+    {"caption": "Javascript: Hoist `var` statements", "command": "js_hoist_vars"}
+]
