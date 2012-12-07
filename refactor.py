@@ -164,12 +164,30 @@ class JsHoistVarsCommand(sublime_plugin.TextCommand):
         cursor = view.sel()[0]
 
         block = get_current_body(view, cursor)
-        #view.add_regions("hoister_function", block, "code", "", sublime.DRAW_OUTLINED)
 
         #print find_vars(view, block)
         var_statements = find_var_blocks(view, block)
         vars = find_var_names(view, var_statements)
-        print vars
+        #print vars
+        #view.add_regions("hoister_function", var_statements, "code", "", sublime.DRAW_OUTLINED)
 
-        view.add_regions("hoister_function", vars, "code", "", sublime.DRAW_OUTLINED)
+        if len(var_statements) == 0:
+            return
+
+        to_add = []
+
+        for statement in var_statements[1:]:
+            for var in vars:
+                if statement.contains(var):
+                    to_add.append(view.substr(var))
+
+        for statement in reversed(var_statements[1:]):
+            view.erase(edit, sublime.Region(statement.a, statement.a + 4))
+
+        varbegin = var_statements[0].a
+        indent_char = view.substr(sublime.Region(varbegin - 1, varbegin))
+        indent = view.rowcol(varbegin)[1]
+        indent = indent + 1 if indent_char == "\t" else indent + 2
+        sep = ",\n" + indent_char * indent
+        view.insert(edit, var_statements[0].b - 1, sep + sep.join(to_add))
 
