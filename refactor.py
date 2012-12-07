@@ -49,6 +49,7 @@ def get_current_body(view, cursor):
         not_comment = 1
         # find the opening brace
         fun_start = brace = view.find("\\{", function.b)
+        # find the closing brace, keeping mind of sub-blocks
         while depth > 0:
             brace = view.find(r"\{|\}|\/\*|\*\/|\/\/.+$", brace.b)
             try:
@@ -74,19 +75,20 @@ def get_current_body(view, cursor):
         for j in range(i):
             blocks[j] = subtract_from_regions(blocks[j], blocks[i][0])
 
-    #flatten array
     #flatblocks = [block for list in blocks for block in list]
-    #view.add_regions("hoister_functions", flatblocks, "code", "", sublime.DRAW_OUTLINED)
 
+    # find the block containing the cursor, return
     for block in blocks:
         for region in block:
             if region.contains(cursor):
                 return block
+
+    # the cursor is not in a function
     return []
 
 
 def find_vars(view, block):
-    # grab the text of every region, and concatenate, strip out line breaks
+    # grab the text of every region, and concatenate
     text = "__BLOCK__".join([view.substr(region) for region in block])
     vars = []
     for statement in re.findall("var([^;]+);", text):
@@ -102,40 +104,50 @@ def find_var_blocks(view, block):
     vars = []
 
     while start < end:
+        # search for " var "
         varbegin = view.find("[^\w](var) ", start)
         if not varbegin or varbegin.a > end:
             break
 
+        # find again to strip the leading whitespace
         varbegin = view.find("var", varbegin.a)
 
+        # this block might not contain the current var statement (e.g. nested function)
         if not block_contains(block, varbegin):
             start = varbegin.b
             continue
 
-        varend = varbegin
+        # find the closing semicolon, starting at the end of the "var"
+        start = varbegin.b
         while True:
-            varend = view.find(";", varend.b)
+            varend = view.find(";", start)
+            # make sure we're not in a nested function
             if block_contains(block, varend):
                 break
 
         vars.append(sublime.Region(varbegin.a, varend.b))
+        # set up to seach for more var statements in this block
         start = varend.b
 
     return vars
 
 
 def find_var_names(view, blocks):
+    # {blocks} is a array of regions, from the opening var, to the closing semicolon
     vars = []
     for block in blocks:
+        # an identifier should be immediately following the `var`
         ident = view.find("[a-zA-Z_$][0-9a-zA-Z_$]*", block.a + 4)
         vars.append(ident)
         tok = ident
         level = 0
         not_comment = 1
+        #find commas and semicolons, respecting (), [], and {} pairs
         while tok.a < block.b:
             tok = view.find(r"[,\{\}\[\]\(\);]|\/\*|\*\/|\/\/.*$", tok.b)
             string = view.substr(tok)
             if string == ";" and level == 0:
+                # we're at the end of the block.  If level != 0, we're inside a function
                 break
             elif string in ["{", "[", "("]:
                 level += 1 * not_comment
@@ -146,6 +158,8 @@ def find_var_names(view, blocks):
             elif string == "*/":
                 not_comment = 1
             elif string == "," and level == 0:
+                # we're at the beginning of a new delcaration
+                # if level != 0, we're inside an array or object literal, or function
                 tok = view.find("[a-zA-Z_$][0-9a-zA-Z_$]*", tok.b)
                 vars.append(tok)
 
@@ -176,18 +190,23 @@ class JsHoistVarsCommand(sublime_plugin.TextCommand):
 
         to_add = []
 
+        # get all var identifier strings that are not in the first var statement
         for statement in var_statements[1:]:
             for var in vars:
                 if statement.contains(var):
                     to_add.append(view.substr(var))
 
+        # erase the var keyword in secondary var statements
         for statement in reversed(var_statements[1:]):
             view.erase(edit, sublime.Region(statement.a, statement.a + 4))
 
         varbegin = var_statements[0].a
+        # the char before the first var statement
         indent_char = view.substr(sublime.Region(varbegin - 1, varbegin))
+        # the column is the indentation level
         indent = view.rowcol(varbegin)[1]
+        # assume 2 spaces for indentation
         indent = indent + 1 if indent_char == "\t" else indent + 2
         sep = ",\n" + indent_char * indent
+        # write the gathered var identifiers
         view.insert(edit, var_statements[0].b - 1, sep + sep.join(to_add))
-
